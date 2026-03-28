@@ -6,20 +6,39 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"log"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	// "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
-	//
-	// Uncomment to load all auth plugins
-	// _ "k8s.io/client-go/plugin/pkg/client/auth"
-	//
-	// Or uncomment to load specific auth plugins
-	// _ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
+
 )
+
+
+// Retrieve Pods in a given namespace
+func GetPodListInNamespace(namespace string, clientset *kubernetes.Clientset) ([]corev1.Pod, error) {
+	pods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get pods in namespace %v: %v\n",namespace, err)
+		return nil, err
+	} else {
+		return pods.Items, nil
+	}
+}
+// Print Slice of Pods
+func PrintPodList(pods []corev1.Pod) {
+
+	if pods == nil {
+		log.Fatalf("Failed to print pods in PrintPodList.")
+	}
+	for i, pod := range pods {
+		fmt.Printf("%v: %v\n", i, pod.Name)
+	}
+}
 
 func main() {
 	// Try in-cluster config first, then fall back to local kubeconfig for local runs.
@@ -35,33 +54,18 @@ func main() {
 	} else {
 		fmt.Println("Using in-cluster Kubernetes configuration")
 	}
-	// creates the clientset
+
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create Kubernetes clientset: %v\n", err)
 		os.Exit(1)
 	}
-	for {
-		pods, err := clientset.CoreV1().Pods("lokid").List(context.TODO(), metav1.ListOptions{})
+	
+		namespace := "lokilab"
+		pods, err := GetPodListInNamespace(namespace, clientset)
 		if err != nil {
-			panic(err.Error())
+			log.Fatalf("Error returned from GetPodListInNamespace: %v", err)
 		}
-		fmt.Printf("There are %d pods in the lokid namespace\n", len(pods.Items))
+		PrintPodList(pods)
 
-		// Examples for error handling:
-		// - Use helper functions e.g. errors.IsNotFound()
-		// - And/or cast to StatusError and use its properties like e.g. ErrStatus.Message
-		_, err = clientset.CoreV1().Pods("lokid").Get(context.TODO(), "example-xxxxx", metav1.GetOptions{})
-		if errors.IsNotFound(err) {
-			fmt.Printf("Pod example-xxxxx not found in lokid namespace\n")
-		} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
-			fmt.Printf("Error getting pod %v\n", statusError.ErrStatus.Message)
-		} else if err != nil {
-			panic(err.Error())
-		} else {
-			fmt.Printf("Found example-xxxxx pod in lokid namespace\n")
-		}
-
-		time.Sleep(10 * time.Second)
-	}
 }
