@@ -1,0 +1,84 @@
+# =========================
+# Go build artifacts
+# =========================
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.a
+
+# Output binaries
+bin/
+dist/
+build/
+
+# Go workspace file (optional, commit if using workspace intentionally)
+go.work
+go.work.sum
+
+# Vendor directory (uncomment if you DON'T want to commit dependencies)
+# vendor/
+
+# Dependency directories (rare, but sometimes used)
+Godeps/
+
+# =========================
+# Logs & temp files
+# =========================
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*.pid
+
+# =========================
+# OS generated files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# IDE / Editor
+# =========================
+
+# VS Code
+.vscode/
+
+# JetBrains (GoLand, IntelliJ)
+.idea/
+
+# Vim
+*.swp
+
+# Emacs
+*~
+
+# =========================
+# Testing / Coverage
+# =========================
+coverage.out
+*.coverprofile
+*.cov
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.*
+*.env
+
+# =========================
+# Docker / DevOps (optional)
+# =========================
+*.tar
+*.gz
+
+# =========================
+# Misc
+# =========================
+*.bak
+*.old
