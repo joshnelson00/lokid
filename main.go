@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 	"log"
+	"math/rand"
 
 	// "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,12 +33,47 @@ func GetPodListInNamespace(namespace string, clientset *kubernetes.Clientset) ([
 func PrintPodList(pods []corev1.Pod) {
 
 	if pods == nil {
-		log.Fatalf("Failed to print pods in PrintPodList.")
+		log.Fatal("Failed to print pods in PrintPodList.")
 	}
 	for i, pod := range pods {
 		fmt.Printf("%v: %v\n", i, pod.Name)
 	}
 }
+
+func deletePod(clientset *kubernetes.Clientset, ctx context.Context, pod corev1.Pod, options metav1.DeleteOptions) error {
+	podName := pod.Name
+	err := clientset.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, options)
+	if err != nil {
+		log.Fatalf("Failed to delete Pod %v", podName)
+	}
+
+	return err
+}
+
+func KillPods(clientset *kubernetes.Clientset, pods []corev1.Pod, numTargets int, namespace string) []corev1.Pod {
+	filteredPods := []corev1.Pod{}
+	for _, pod := range pods {
+		if pod.Namespace == namespace {
+			filteredPods = append(filteredPods, pod)
+		}
+	}
+	podListLength := len(filteredPods)
+	numPodsInKillPool := min(podListLength, numTargets)
+
+
+	for i := 0; i < numPodsInKillPool; i++ {
+		randomPodIndex := rand.len(filteredPods)
+		randomPod := filteredPods[randomPodIndex]
+
+		options := nil
+		err := deletePod(clientset, context.TODO(), pod, options)
+    	if err != nil {
+			fmt.Printf("failed to delete pod %s: %v\n", pod.Name, err)
+			continue
+		}
+	}
+}
+
 
 func main() {
 	// Try in-cluster config first, then fall back to local kubeconfig for local runs.
