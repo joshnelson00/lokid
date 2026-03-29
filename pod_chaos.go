@@ -6,9 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"log"
-	"time"
 	"math/rand"
-
+	"time"
 	// "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -41,10 +40,11 @@ func PrintPodList(pods []corev1.Pod) {
 		log.Fatal("Failed to print pods in PrintPodList.")
 	}
 	for i, pod := range pods {
-		fmt.Printf("%v: %v\n", i, pod.Name)
+		fmt.Printf("%v: %v\n    - Namespace: %v\n    - Generation: %v\n    - Labels: %v\n", i+1, pod.Name, pod.Namespace, pod.Generation, pod.Labels)
 	}
+	fmt.Print("\n")
 }
-
+// Helper Function for Matching Pod Labels to pods
 func matchesLabels(podLabels map[string]string, required map[string]string) bool {
     for key, value := range required {
         if podLabels[key] != value {
@@ -53,7 +53,7 @@ func matchesLabels(podLabels map[string]string, required map[string]string) bool
     }
     return true
 }
-
+// Filter pods based on attributes
 func filterPods(pods []corev1.Pod, opts PodFilterOptions) []corev1.Pod {
 	filteredPods := []corev1.Pod{}
 	for _, pod := range pods {
@@ -70,6 +70,7 @@ func filterPods(pods []corev1.Pod, opts PodFilterOptions) []corev1.Pod {
 	}
 	return filteredPods
 }
+// Delete a single pod
 func deletePod(clientset *kubernetes.Clientset, ctx context.Context, pod corev1.Pod, options metav1.DeleteOptions) error {
 	podName := pod.Name
 	err := clientset.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, options)
@@ -79,16 +80,15 @@ func deletePod(clientset *kubernetes.Clientset, ctx context.Context, pod corev1.
 
 	return nil
 }
-
+// Kill several pods
 func KillPods(clientset *kubernetes.Clientset, pods []corev1.Pod, percentage float64, opts PodFilterOptions) []corev1.Pod {
-	filteredPods = filterPods(pods, opts)
-	podListLength := len(filteredPods)
-	numPodsInKillPool := min(podListLength, percentage * len(pods))
-
+	validPods := filterPods(pods, opts)
+	listLength := len(validPods)
+	numPodsInKillPool := int(percentage * float64(listLength))
 	killed := []corev1.Pod{}
 
-	rand.Shuffle(len(filteredPods), func(i, j int) {
-		filteredPods[i], filteredPods[j] = filteredPods[j], filteredPods[i]
+	rand.Shuffle(len(validPods), func(i, j int) {
+		validPods[i], validPods[j] = validPods[j], validPods[i]
 	}) 
 
 	gracePeriod := int64(0)
@@ -97,7 +97,7 @@ func KillPods(clientset *kubernetes.Clientset, pods []corev1.Pod, percentage flo
 	}
 
 	for i := 0; i < numPodsInKillPool; i++ {
-		pod := filteredPods[i]
+		pod := validPods[i]
 		err := deletePod(clientset, context.TODO(), pod, options)
 		if err != nil {
 			fmt.Printf("failed to delete pod %s: %v\n", pod.Name, err)
@@ -144,6 +144,10 @@ func main() {
 	}
 	percentage := 0.4
 	KillPods(clientset, pods, percentage, opts)
-
-
+	time.Sleep(60 * time.Second)
+	pods, err = GetPodListInNamespace(namespace, clientset)
+	if err != nil {
+		log.Fatalf("Error returned from GetPodListInNamespace: %v", err)
+	}
+	PrintPodList(pods)
 }
