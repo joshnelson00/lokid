@@ -19,6 +19,11 @@ import (
 
 )
 
+type PodFilterOptions struct {
+	Name string `json:"name"`
+	Namespace string `json:"namespace"`
+	Labels map[string]string `json:"labels,omitempty"`
+}
 
 // Retrieve Pods in a given namespace
 func GetPodListInNamespace(namespace string, clientset *kubernetes.Clientset) ([]corev1.Pod, error) {
@@ -32,7 +37,6 @@ func GetPodListInNamespace(namespace string, clientset *kubernetes.Clientset) ([
 }
 // Print Slice of Pods
 func PrintPodList(pods []corev1.Pod) {
-
 	if pods == nil {
 		log.Fatal("Failed to print pods in PrintPodList.")
 	}
@@ -41,6 +45,31 @@ func PrintPodList(pods []corev1.Pod) {
 	}
 }
 
+func matchesLabels(podLabels map[string]string, required map[string]string) bool {
+    for key, value := range required {
+        if podLabels[key] != value {
+            return false
+        }
+    }
+    return true
+}
+
+func filterPods(pods []corev1.Pod, opts PodFilterOptions) []corev1.Pod {
+	filteredPods := []corev1.Pod{}
+	for _, pod := range pods {
+		if opts.Name != "" && pod.Name != opts.Name {
+			continue
+		}
+		if opts.Namespace != "" && pod.Namespace != opts.Namespace {
+			continue
+		}
+		if opts.Labels != nil && !matchesLabels(pod.Labels, opts.Labels) {
+            continue
+        }
+		filteredPods = append(filteredPods, pod)
+	}
+	return filteredPods
+}
 func deletePod(clientset *kubernetes.Clientset, ctx context.Context, pod corev1.Pod, options metav1.DeleteOptions) error {
 	podName := pod.Name
 	err := clientset.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, options)
@@ -51,15 +80,10 @@ func deletePod(clientset *kubernetes.Clientset, ctx context.Context, pod corev1.
 	return nil
 }
 
-func KillPods(clientset *kubernetes.Clientset, pods []corev1.Pod, numTargets int, namespace string) []corev1.Pod {
-	filteredPods := []corev1.Pod{}
-	for _, pod := range pods {
-		if pod.Namespace == namespace {
-			filteredPods = append(filteredPods, pod)
-		}
-	}
+func KillPods(clientset *kubernetes.Clientset, pods []corev1.Pod, percentage float64, opts PodFilterOptions) []corev1.Pod {
+	filteredPods = filterPods(pods, opts)
 	podListLength := len(filteredPods)
-	numPodsInKillPool := min(podListLength, numTargets)
+	numPodsInKillPool := min(podListLength, percentage * len(pods))
 
 	killed := []corev1.Pod{}
 
@@ -106,18 +130,20 @@ func main() {
 		os.Exit(1)
 	}
 	
-	namespace := "lokilab"
+	namespace := ""
 	pods, err := GetPodListInNamespace(namespace, clientset)
 	if err != nil {
 		log.Fatalf("Error returned from GetPodListInNamespace: %v", err)
 	}
 	PrintPodList(pods)
-	time.Sleep(5 * time.Second)
-	KillPods(clientset, pods, 2, namespace)
-	time.Sleep(30 * time.Second)
-	newPods, err := GetPodListInNamespace(namespace, clientset)
-	if err != nil {
-		log.Fatalf("Error returned from GetPodListInNamespace: %v", err)
+
+	opts := PodFilterOptions{
+		Name: "",
+		Namespace: "lokilab",
+		Labels: nil,
 	}
-	PrintPodList(newPods)
+	percentage := 0.4
+	KillPods(clientset, pods, percentage, opts)
+
+
 }
