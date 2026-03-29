@@ -15,7 +15,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
-
 )
 
 type PodFilterOptions struct {
@@ -71,7 +70,7 @@ func filterPods(pods []corev1.Pod, opts PodFilterOptions) []corev1.Pod {
 	return filteredPods
 }
 // Delete a single pod
-func deletePod(clientset *kubernetes.Clientset, ctx context.Context, pod corev1.Pod, options metav1.DeleteOptions) error {
+func deletePod(ctx context.Context, clientset *kubernetes.Clientset, pod corev1.Pod, options metav1.DeleteOptions) error {
 	podName := pod.Name
 	err := clientset.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, options)
 	if err != nil {
@@ -98,7 +97,7 @@ func KillPods(clientset *kubernetes.Clientset, pods []corev1.Pod, percentage flo
 
 	for i := 0; i < numPodsInKillPool; i++ {
 		pod := validPods[i]
-		err := deletePod(clientset, context.TODO(), pod, options)
+		err := deletePod(context.TODO(), clientset, pod, options)
 		if err != nil {
 			fmt.Printf("failed to delete pod %s: %v\n", pod.Name, err)
 			continue
