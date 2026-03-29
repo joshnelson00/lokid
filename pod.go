@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"log"
+	"time"
 	"math/rand"
 
 	// "k8s.io/apimachinery/pkg/api/errors"
@@ -47,7 +48,7 @@ func deletePod(clientset *kubernetes.Clientset, ctx context.Context, pod corev1.
 		log.Fatalf("Failed to delete Pod %v", podName)
 	}
 
-	return err
+	return nil
 }
 
 func KillPods(clientset *kubernetes.Clientset, pods []corev1.Pod, numTargets int, namespace string) []corev1.Pod {
@@ -60,20 +61,29 @@ func KillPods(clientset *kubernetes.Clientset, pods []corev1.Pod, numTargets int
 	podListLength := len(filteredPods)
 	numPodsInKillPool := min(podListLength, numTargets)
 
+	killed := []corev1.Pod{}
+
+	rand.Shuffle(len(filteredPods), func(i, j int) {
+		filteredPods[i], filteredPods[j] = filteredPods[j], filteredPods[i]
+	}) 
+
+	gracePeriod := int64(0)
+	options := metav1.DeleteOptions{
+		GracePeriodSeconds: &gracePeriod,
+	}
 
 	for i := 0; i < numPodsInKillPool; i++ {
-		randomPodIndex := rand.len(filteredPods)
-		randomPod := filteredPods[randomPodIndex]
-
-		options := nil
+		pod := filteredPods[i]
 		err := deletePod(clientset, context.TODO(), pod, options)
-    	if err != nil {
+		if err != nil {
 			fmt.Printf("failed to delete pod %s: %v\n", pod.Name, err)
 			continue
 		}
+		killed = append(killed, pod)
 	}
-}
 
+	return killed
+}
 
 func main() {
 	// Try in-cluster config first, then fall back to local kubeconfig for local runs.
@@ -96,11 +106,18 @@ func main() {
 		os.Exit(1)
 	}
 	
-		namespace := "lokilab"
-		pods, err := GetPodListInNamespace(namespace, clientset)
-		if err != nil {
-			log.Fatalf("Error returned from GetPodListInNamespace: %v", err)
-		}
-		PrintPodList(pods)
-
+	namespace := "lokilab"
+	pods, err := GetPodListInNamespace(namespace, clientset)
+	if err != nil {
+		log.Fatalf("Error returned from GetPodListInNamespace: %v", err)
+	}
+	PrintPodList(pods)
+	time.Sleep(5 * time.Second)
+	KillPods(clientset, pods, 2, namespace)
+	time.Sleep(30 * time.Second)
+	newPods, err := GetPodListInNamespace(namespace, clientset)
+	if err != nil {
+		log.Fatalf("Error returned from GetPodListInNamespace: %v", err)
+	}
+	PrintPodList(newPods)
 }
