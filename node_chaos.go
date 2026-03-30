@@ -8,7 +8,7 @@ import (
 	"log"
 	"sort"
 	// "math/rand"
-	// "time"
+	"time"
 	// "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -17,6 +17,20 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 )
+
+type NodeFilterOptions struct {
+	Name            string            `json:"name,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
+
+	Ready           *bool             `json:"ready,omitempty"`
+	Unschedulable   *bool             `json:"unschedulable,omitempty"`
+
+	Roles           []string          `json:"roles,omitempty"`
+
+	ExcludeNames    []string          `json:"excludeNames,omitempty"`
+	ExcludeLabels   map[string]string `json:"excludeLabels,omitempty"`
+}
 
 func GetNodeList(ctx context.Context, clientset *kubernetes.Clientset, opts metav1.ListOptions) ([]corev1.Node, error) {
 	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), opts)
@@ -62,8 +76,17 @@ func FilterNodes() {
 	return
 }
 
-func DeleteNode() {
-	return
+func DeleteNode(clientset *kubernetes.Clientset, node corev1.Node) (corev1.Node) {
+	gracePeriod := int64(0)
+	opts := metav1.DeleteOptions{
+		GracePeriodSeconds: &gracePeriod,
+	}
+	err := clientset.CoreV1().Nodes().Delete(context.TODO(), node.Name, opts)
+	if err != nil {
+		fmt.Printf("Couldn't delete node %v", node.Name)
+	}
+
+	return node
 }
 
 func CordonNode() {
@@ -110,8 +133,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to create Kubernetes clientset: %v\n", err)
 		os.Exit(1)
 	}
+
 	opts := metav1.ListOptions{}
 	nodes, err := GetNodeList(context.TODO(), clientset, opts)
+	if err != nil {
+		os.Exit(1)
+	}
+
+	PrintNodeList(nodes)
+	DeleteNode(clientset, nodes[0])
+	time.Sleep(20 * time.Second)
+
+	nodes, err = GetNodeList(context.TODO(), clientset, opts)
 	if err != nil {
 		os.Exit(1)
 	}

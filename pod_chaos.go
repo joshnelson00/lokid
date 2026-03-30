@@ -44,7 +44,7 @@ func PrintPodList(pods []corev1.Pod) {
 	fmt.Print("\n")
 }
 // Helper Function for Matching Pod Labels to pods
-func matchesLabels(podLabels map[string]string, required map[string]string) bool {
+func MatchesPodLabels(podLabels map[string]string, required map[string]string) bool {
     for key, value := range required {
         if podLabels[key] != value {
             return false
@@ -53,7 +53,7 @@ func matchesLabels(podLabels map[string]string, required map[string]string) bool
     return true
 }
 // Filter pods based on attributes
-func filterPods(pods []corev1.Pod, opts PodFilterOptions) []corev1.Pod {
+func FilterPods(pods []corev1.Pod, opts PodFilterOptions) []corev1.Pod {
 	filteredPods := []corev1.Pod{}
 	for _, pod := range pods {
 		if opts.Name != "" && pod.Name != opts.Name {
@@ -62,7 +62,7 @@ func filterPods(pods []corev1.Pod, opts PodFilterOptions) []corev1.Pod {
 		if opts.Namespace != "" && pod.Namespace != opts.Namespace {
 			continue
 		}
-		if opts.Labels != nil && !matchesLabels(pod.Labels, opts.Labels) {
+		if opts.Labels != nil && !MatchesPodLabels(pod.Labels, opts.Labels) {
             continue
         }
 		filteredPods = append(filteredPods, pod)
@@ -70,7 +70,7 @@ func filterPods(pods []corev1.Pod, opts PodFilterOptions) []corev1.Pod {
 	return filteredPods
 }
 // Delete a single pod
-func deletePod(ctx context.Context, clientset *kubernetes.Clientset, pod corev1.Pod, options metav1.DeleteOptions) error {
+func DeletePod(ctx context.Context, clientset *kubernetes.Clientset, pod corev1.Pod, options metav1.DeleteOptions) error {
 	podName := pod.Name
 	err := clientset.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, options)
 	if err != nil {
@@ -81,7 +81,7 @@ func deletePod(ctx context.Context, clientset *kubernetes.Clientset, pod corev1.
 }
 // Kill several pods
 func KillPods(clientset *kubernetes.Clientset, pods []corev1.Pod, percentage float64, opts PodFilterOptions) []corev1.Pod {
-	validPods := filterPods(pods, opts)
+	validPods := FilterPods(pods, opts)
 	listLength := len(validPods)
 	numPodsInKillPool := int(percentage * float64(listLength))
 	killed := []corev1.Pod{}
@@ -97,7 +97,7 @@ func KillPods(clientset *kubernetes.Clientset, pods []corev1.Pod, percentage flo
 
 	for i := 0; i < numPodsInKillPool; i++ {
 		pod := validPods[i]
-		err := deletePod(context.TODO(), clientset, pod, options)
+		err := DeletePod(context.TODO(), clientset, pod, options)
 		if err != nil {
 			fmt.Printf("failed to delete pod %s: %v\n", pod.Name, err)
 			continue
