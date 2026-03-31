@@ -68,11 +68,17 @@ func PrintNodeList(nodes []corev1.Node) {
 
 	fmt.Print("\n")
 }
-func MatchesNodeLabels() {
-	return
+
+func MatchesNodeLabels(nodeLabels map[string]string, required map[string]string) {
+	for key, value := range required {
+        if nodeLabels[key] != value {
+            return false
+        }
+    }
+    return true
 }
 
-func FilterNodes() {
+func FilterNodes(nodes []corev1.Node, opts NodeFilterOptions) {
 	return
 }
 
@@ -89,24 +95,24 @@ func DeleteNode(clientset *kubernetes.Clientset, node corev1.Node) (corev1.Node)
 	return node
 }
 
-func CordonNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1.Node, opts metav1.UpdateOptions) (corev1.Node) {
+func CordonNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1.Node, opts metav1.UpdateOptions) (*corev1.Node, error) {
 	node.Spec.Unschedulable = true
 	updatedNode, err := clientset.CoreV1().Nodes().Update(context.TODO(), &node, opts)
 	if err != nil {
-		fmt.Printf("Couldn't Cordon node %v", node.Name)
+		return nil, err
 	}
 
-	return *updatedNode
+	return updatedNode, nil
 }
 
-func UncordonNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1.Node, opts metav1.UpdateOptions) (corev1.Node) {
+func UncordonNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1.Node, opts metav1.UpdateOptions) (*corev1.Node, error) {
 	node.Spec.Unschedulable = false
 	updatedNode, err := clientset.CoreV1().Nodes().Update(context.TODO(), &node, opts)
 	if err != nil {
-		fmt.Printf("Couldn't Uncordon node %v", node.Name)
+		return nil, err
 	}
 
-	return *updatedNode
+	return updatedNode, nil
 }
 
 func DrainNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1.Node) (error) {
@@ -118,7 +124,17 @@ func DrainNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1
 		return err
 	}
 	
-	for _, pod := range pods.Items {
+	err = EvictPodsFromNode(clientset, pods.Items)
+	if err != nil {
+		fmt.Printf("Couldn't exict pods in node %v", node.Name)
+		return err
+	}
+
+	return nil
+}
+
+func EvictPodsFromNode(clientset *kubernetes.Clientset, pods []corev1.Pod) (error) {
+	for _, pod := range pods {
 		eviction := policyv1.Eviction{
 			ObjectMeta: metav1.ObjectMeta {
 				Name: pod.Name,
@@ -130,12 +146,8 @@ func DrainNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1
 	return nil
 }
 
-func EvictPodsFromNode() {
-	return
-}
-
 func SelectRandomNodes() {
-	return
+	
 }
 
 func ApplyNodeChaos() {
@@ -176,7 +188,11 @@ func main() {
 	// --- Cordon + Drain first node ---
 	target := nodes[0]
 	fmt.Printf(">>> Cordoning node: %s\n", target.Name)
-	target = CordonNode(ctx, clientset, target, metav1.UpdateOptions{})
+	cordonedNode, err := CordonNode(ctx, clientset, target, metav1.UpdateOptions{})
+	if err != nil {
+		log.Fatalf("cordoning failed: %v", err)
+	}
+	target = *cordonedNode
 
 	fmt.Printf(">>> Draining node: %s\n", target.Name)
 	err = DrainNode(ctx, clientset, target)
@@ -196,7 +212,9 @@ func main() {
 	}
 	PrintNodeList(nodes)
 
-	// --- Uncordon to restore ---
-	fmt.Printf(">>> Uncordoning node: %s\n", target.Name)
-	CordonNode(ctx, clientset, target, metav1.UpdateOptions{})
+	uncordonedNode, err := UncordonNode(ctx, clientset, nodes[0], metav1.UpdateOptions{})
+	if err != nil {
+		log.Fatalf("uncordoning failed: %v", err)
+	}
+	fmt.Printf(">>> Uncordoned node: %s\n", uncordonedNode.Name)
 }
