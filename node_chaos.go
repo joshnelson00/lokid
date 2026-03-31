@@ -12,6 +12,7 @@ import (
 	// "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -35,15 +36,14 @@ type NodeFilterOptions struct {
 func GetNodeList(ctx context.Context, clientset *kubernetes.Clientset, opts metav1.ListOptions) ([]corev1.Node, error) {
 	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to get list of nodes: %v\n", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
 	return nodes.Items, nil
 }
 
 func PrintNodeList(nodes []corev1.Node) {
 	if nodes == nil {
-		log.Fatal("Failed to print nodes in PrintNodeList.")
+		return
 	}
 
 	for i, node := range nodes {
@@ -89,16 +89,45 @@ func DeleteNode(clientset *kubernetes.Clientset, node corev1.Node) (corev1.Node)
 	return node
 }
 
-func CordonNode() {
-	return
+func CordonNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1.Node, opts metav1.UpdateOptions) (corev1.Node) {
+	node.Spec.Unschedulable = true
+	updatedNode, err := clientset.CoreV1().Nodes().Update(context.TODO(), &node, opts)
+	if err != nil {
+		fmt.Printf("Couldn't Cordon node %v", node.Name)
+	}
+
+	return *updatedNode
 }
 
-func UncordonNode() {
-	return
+func UncordonNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1.Node, opts metav1.UpdateOptions) (corev1.Node) {
+	node.Spec.Unschedulable = false
+	updatedNode, err := clientset.CoreV1().Nodes().Update(context.TODO(), &node, opts)
+	if err != nil {
+		fmt.Printf("Couldn't Uncordon node %v", node.Name)
+	}
+
+	return *updatedNode
 }
 
-func DrainNode() {
-	return
+func DrainNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1.Node) (error) {
+	pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
+		FieldSelector: "spec.nodeName=" + node.Name,
+	})
+	if err != nil {
+		fmt.Printf("Couldn't get pods for draining in node %v", node.Name)
+		return err
+	}
+	
+	for _, pod := range pods.Items {
+		eviction := policyv1.Eviction{
+			ObjectMeta: metav1.ObjectMeta {
+				Name: pod.Name,
+				Namespace: pod.Namespace,
+			},
+		}
+		clientset.CoreV1().Pods(pod.Namespace).EvictV1(context.TODO(), &eviction)
+	}
+	return nil
 }
 
 func EvictPodsFromNode() {
@@ -114,13 +143,12 @@ func ApplyNodeChaos() {
 }
 
 func main() {
-	// Try in-cluster config first, then fall back to local kubeconfig for local runs.
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		kubeconfigPath := filepath.Join(homedir.HomeDir(), ".kube", "config")
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to load Kubernetes config (in-cluster and local kubeconfig): %v\n", err)
+			fmt.Fprintf(os.Stderr, "failed to load Kubernetes config: %v\n", err)
 			os.Exit(1)
 		}
 		fmt.Printf("Using local kubeconfig: %s\n", kubeconfigPath)
@@ -134,19 +162,41 @@ func main() {
 		os.Exit(1)
 	}
 
-	opts := metav1.ListOptions{}
-	nodes, err := GetNodeList(context.TODO(), clientset, opts)
+	ctx := context.TODO()
+	listOpts := metav1.ListOptions{}
+
+	// --- Before ---
+	fmt.Println("=== Nodes Before Drain ===")
+	nodes, err := GetNodeList(ctx, clientset, listOpts)
 	if err != nil {
+		log.Fatalf("GetNodeList failed: %v", err)  // this will show the real reason
+	}
+	PrintNodeList(nodes)
+
+	// --- Cordon + Drain first node ---
+	target := nodes[0]
+	fmt.Printf(">>> Cordoning node: %s\n", target.Name)
+	target = CordonNode(ctx, clientset, target, metav1.UpdateOptions{})
+
+	fmt.Printf(">>> Draining node: %s\n", target.Name)
+	err = DrainNode(ctx, clientset, target)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "drain failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	PrintNodeList(nodes)
-	DeleteNode(clientset, nodes[0])
-	time.Sleep(20 * time.Second)
+	fmt.Println("Waiting 30s for pods to reschedule...")
+	time.Sleep(30 * time.Second)
 
-	nodes, err = GetNodeList(context.TODO(), clientset, opts)
+	// --- After ---
+	fmt.Println("=== Nodes After Drain ===")
+	nodes, err = GetNodeList(ctx, clientset, listOpts)
 	if err != nil {
 		os.Exit(1)
 	}
 	PrintNodeList(nodes)
+
+	// --- Uncordon to restore ---
+	fmt.Printf(">>> Uncordoning node: %s\n", target.Name)
+	CordonNode(ctx, clientset, target, metav1.UpdateOptions{})
 }
