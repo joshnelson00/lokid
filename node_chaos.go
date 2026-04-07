@@ -3,16 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
-	"log"
 	"sort"
 	// "math/rand"
 	"time"
 	// "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -20,17 +20,17 @@ import (
 )
 
 type NodeFilterOptions struct {
-	Name            string            `json:"name,omitempty"`
-	Labels          map[string]string `json:"labels,omitempty"`
-	Annotations     map[string]string `json:"annotations,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 
-	Ready           *bool             `json:"ready,omitempty"`
-	Unschedulable   *bool             `json:"unschedulable,omitempty"`
+	Ready         *bool `json:"ready,omitempty"`
+	Unschedulable *bool `json:"unschedulable,omitempty"`
 
-	Roles           []string          `json:"roles,omitempty"`
+	Roles []string `json:"roles,omitempty"`
 
-	ExcludeNames    []string          `json:"excludeNames,omitempty"`
-	ExcludeLabels   map[string]string `json:"excludeLabels,omitempty"`
+	ExcludeNames  []string          `json:"excludeNames,omitempty"`
+	ExcludeLabels map[string]string `json:"excludeLabels,omitempty"`
 }
 
 func GetNodeList(ctx context.Context, clientset *kubernetes.Clientset, opts metav1.ListOptions) ([]corev1.Node, error) {
@@ -69,20 +69,54 @@ func PrintNodeList(nodes []corev1.Node) {
 	fmt.Print("\n")
 }
 
-func MatchesNodeLabels(nodeLabels map[string]string, required map[string]string) {
+func MatchesMap(nodeMap map[string]string, required map[string]string) bool {
 	for key, value := range required {
-        if nodeLabels[key] != value {
-            return false
-        }
-    }
-    return true
+		if nodeMap[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func MatchesSlice(nodeSlice []string, required []string) bool {
+	for i := range required {
+		if nodeSlice[i] != required[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func FilterNodes(nodes []corev1.Node, opts NodeFilterOptions) {
-	return
+	/*
+		Name            string            `json:"name,omitempty"`
+		Labels          map[string]string `json:"labels,omitempty"`
+		Annotations     map[string]string `json:"annotations,omitempty"`
+
+		Ready           *bool             `json:"ready,omitempty"`
+		Unschedulable   *bool             `json:"unschedulable,omitempty"`
+
+		Roles           []string          `json:"roles,omitempty"`
+
+		ExcludeNames    []string          `json:"excludeNames,omitempty"`
+		ExcludeLabels   map[string]string `json:"excludeLabels,omitempty"`
+	*/
+
+	for _, node := range nodes {
+		if NodeFilterOptions.Name == "" || NodeFilterOptions.Name != node.Name ||
+			len(NodeFilterOptions.Labels) == 0 || !MatchesMap(node.Labels, NodeFilterOptions) ||
+			len(NodeFilterOptions.Annotations) == 0 || !MatchesMap(node.Annotations, NodeFilterOptions) ||
+			NodeFilterOptions.Ready != node.Ready ||
+			NodeFilterOptions.Unschedulable != node.Spec.Unschedulable ||
+			len(NodeFilterOptions.Roles) == 0 || !MatchesSlice(node.Roles, NodeFilterOptions.Roles) ||
+			len(NodeFilterOptions.ExcludeNames) == 0 || !MatchesSlice(node.ExcludeNames, NodeFilterOptions.ExcludeNames) ||
+			len(NodeFilterOptions.ExcludeLabels) == 0 || !MatchesMap(node.ExcludeLabels, NodeFilterOptions.ExcludeLabels) /* Not correct "Get" for excludelabels? Maybe sort with the good labels? */ {
+			continue
+		}
+	}
 }
 
-func DeleteNode(clientset *kubernetes.Clientset, node corev1.Node) (corev1.Node) {
+func DeleteNode(clientset *kubernetes.Clientset, node corev1.Node) corev1.Node {
 	gracePeriod := int64(0)
 	opts := metav1.DeleteOptions{
 		GracePeriodSeconds: &gracePeriod,
@@ -115,7 +149,7 @@ func UncordonNode(ctx context.Context, clientset *kubernetes.Clientset, node cor
 	return updatedNode, nil
 }
 
-func DrainNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1.Node) (error) {
+func DrainNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1.Node) error {
 	pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
 		FieldSelector: "spec.nodeName=" + node.Name,
 	})
@@ -123,7 +157,7 @@ func DrainNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1
 		fmt.Printf("Couldn't get pods for draining in node %v", node.Name)
 		return err
 	}
-	
+
 	err = EvictPodsFromNode(clientset, pods.Items)
 	if err != nil {
 		fmt.Printf("Couldn't exict pods in node %v", node.Name)
@@ -133,11 +167,11 @@ func DrainNode(ctx context.Context, clientset *kubernetes.Clientset, node corev1
 	return nil
 }
 
-func EvictPodsFromNode(clientset *kubernetes.Clientset, pods []corev1.Pod) (error) {
+func EvictPodsFromNode(clientset *kubernetes.Clientset, pods []corev1.Pod) error {
 	for _, pod := range pods {
 		eviction := policyv1.Eviction{
-			ObjectMeta: metav1.ObjectMeta {
-				Name: pod.Name,
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pod.Name,
 				Namespace: pod.Namespace,
 			},
 		}
@@ -147,7 +181,6 @@ func EvictPodsFromNode(clientset *kubernetes.Clientset, pods []corev1.Pod) (erro
 }
 
 func SelectRandomNodes() {
-	
 }
 
 func ApplyNodeChaos() {
@@ -181,7 +214,7 @@ func main() {
 	fmt.Println("=== Nodes Before Drain ===")
 	nodes, err := GetNodeList(ctx, clientset, listOpts)
 	if err != nil {
-		log.Fatalf("GetNodeList failed: %v", err)  // this will show the real reason
+		log.Fatalf("GetNodeList failed: %v", err) // this will show the real reason
 	}
 	PrintNodeList(nodes)
 
@@ -218,3 +251,4 @@ func main() {
 	}
 	fmt.Printf(">>> Uncordoned node: %s\n", uncordonedNode.Name)
 }
+
