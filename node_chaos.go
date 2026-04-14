@@ -71,20 +71,31 @@ func PrintNodeList(nodes []corev1.Node) {
 
 func MatchesMap(nodeMap map[string]string, required map[string]string) bool {
 	for key, value := range required {
-		if nodeMap[key] != value {
-			return false
+		if nodeMap[key] == value {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func MatchesSlice(nodeSlice []string, required []string) bool {
 	for i := range required {
-		if nodeSlice[i] != required[i] {
-			return false
+		if nodeSlice[i] == required[i] {
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+func IsExcludedName(nodeName string, names []string) (bool) {
+	for _, name := range names {
+		if nodeName == name {
+			return true
+		} else {
+			continue
+		}
+	}
+	return false
 }
 
 func FilterNodes(nodes []corev1.Node, opts NodeFilterOptions) {
@@ -102,19 +113,44 @@ func FilterNodes(nodes []corev1.Node, opts NodeFilterOptions) {
 		ExcludeLabels   map[string]string `json:"excludeLabels,omitempty"`
 	*/
 
-	for _, node := range nodes {
-		if NodeFilterOptions.Name == "" || NodeFilterOptions.Name != node.Name ||
-			len(NodeFilterOptions.Labels) == 0 || !MatchesMap(node.Labels, NodeFilterOptions) ||
-			len(NodeFilterOptions.Annotations) == 0 || !MatchesMap(node.Annotations, NodeFilterOptions) ||
-			NodeFilterOptions.Ready != node.Ready ||
-			NodeFilterOptions.Unschedulable != node.Spec.Unschedulable ||
-			len(NodeFilterOptions.Roles) == 0 || !MatchesSlice(node.Roles, NodeFilterOptions.Roles) ||
-			len(NodeFilterOptions.ExcludeNames) == 0 || !MatchesSlice(node.ExcludeNames, NodeFilterOptions.ExcludeNames) ||
-			len(NodeFilterOptions.ExcludeLabels) == 0 || !MatchesMap(node.ExcludeLabels, NodeFilterOptions.ExcludeLabels) /* Not correct "Get" for excludelabels? Maybe sort with the good labels? */ {
+		for _, node := range nodes {
+		// Positive name filter
+		if opts.Name != "" && node.Name != opts.Name {
 			continue
 		}
+		// Exclusion by name
+		if IsExcludedName(node.Name, opts.ExcludeNames) {
+			continue
+		}
+		// Label filter
+		if len(opts.Labels) > 0 && !MatchesMap(node.Labels, opts.Labels) {
+			continue
+		}
+		// Annotation filter
+		if len(opts.Annotations) > 0 && !MatchesMap(node.Annotations, opts.Annotations) {
+			continue
+		}
+		// Unschedulable filter
+		if opts.Unschedulable != nil && *opts.Unschedulable != node.Spec.Unschedulable {
+			continue
+		}
+		// Ready filter -- must read from Status.Conditions
+		if opts.Ready != nil && !MatchesReadyCondition(node, *opts.Ready) {
+			continue
+		}
+		// Roles filter -- roles are stored as labels: node-role.kubernetes.io/<role>
+		if len(opts.Roles) > 0 && !MatchesRoles(node.Labels, opts.Roles) {
+			continue
+		}
+		// Exclude by label -- skip if node matches ANY excluded label
+		if len(opts.ExcludeLabels) > 0 && MatchesMap(node.Labels, opts.ExcludeLabels) {
+			continue
+		}
+
+		filtered = append(filtered, node)
 	}
 }
+
 
 func DeleteNode(clientset *kubernetes.Clientset, node corev1.Node) corev1.Node {
 	gracePeriod := int64(0)
